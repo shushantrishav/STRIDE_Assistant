@@ -9,6 +9,7 @@ __pycache__/
 *.egg
 *.env
 *.venv
+*.sh
 .env.*
 venv/
 venv3/
@@ -29,6 +30,7 @@ stride.db
 *.sqlite3
 *.db
 *.db-journal
+*.rdb
 
 # -----------------------------
 # Model Files

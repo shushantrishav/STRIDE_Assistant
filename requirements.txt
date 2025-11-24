@@ -2,17 +2,19 @@
 fastapi
 uvicorn
 
-# PostgreSQL DB
+# DB
 psycopg
 psycopg_pool
 secrets
+redis
+sqlite3
 
 # Data & Utilities
 python-dotenv
 numpy
 
 # LLM
-llama_cpp
+Ollama
 
 # RAG / NLP
 sentence-transformers

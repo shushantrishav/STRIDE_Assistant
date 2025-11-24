@@ -1,170 +1,162 @@
-## Return Policy
+## Stride Complaint & Service Policies
 
-### Eligibility Criteria (All must be satisfied)
-- Product purchased **within 7 calendar days** from billing date
-- Product is **unused** and unworn
-- **Original packaging** is available
-- **Original GST bill** is intact and unaltered
-- A valid order exists in Stride sales records
+### Return
 
-### Ineligible Conditions (Any one applies)
-- Product shows signs of use
-- Damage caused by normal wear or misuse
-- Missing or damaged original packaging
-- Missing or altered original bill
+**Eligibility (All must be satisfied):**
 
-### Resolution Outcome
-- Customer is requested to visit the outlet
-- Eligible for **replacement or refund** after inspection
-- Final resolution decided by store staff post-verification
+* Product purchased within **7 calendar days** from the billing date
+* Product is **unused** and unworn
+* **Original packaging** is intact
+* **Original GST bill** is available and unaltered
+* A valid order exists in Stride sales records
 
----
+**Ineligible Conditions (Any one applies):**
 
-## Replacement Policy
+* Product shows signs of use
+* Damage due to normal wear or misuse
+* Missing or damaged original packaging
+* Missing or altered GST bill
 
-### Eligibility Criteria (All must be satisfied)
-- Product purchased **within 7 days** from billing date
-- Issue qualifies as a manufacturing defect, such as:
-  - Sole separation
-  - Stitching failure
-  - Glue-related defects
-- Original GST bill available
-- A valid order exists in Stride sales records
+**Resolution Outcome:**
 
-### Ineligible Conditions
-- Damage due to rough or improper usage
-- Water damage
-- Cuts, burns, or intentional damage
+* Customer must visit the outlet
+* Eligible for **refund** after staff inspection
+* Final resolution decided by store staff after verification
 
-### Resolution Outcome
-- Mandatory inspection at the selected outlet
-- Replacement approved **only after staff verification**
-- Replacement subject to product availability in inventory
+**Metadata for Automation:**
+* `decision`: 'approve'
+* `max_days`: 7
+* `min_days`: 0
+* `eligible_intents`: ['return_refund_request']
 
 ---
 
-## Paid Repair Policy
+### Replacement
 
-### Eligibility Criteria
-- Warranty period invalid (** more than 6 months from billing date**)
-- Reported issue is repairable in nature
-- A valid order exists in Stride sales records
+**Eligibility (All must be satisfied):**
 
-### Ineligible Conditions
-- Structural failure beyond feasible repair
+* Product purchased within **7 calendar days** from the billing date
+* Issue qualifies as a **manufacturing defect** (e.g., sole separation, stitching failure, glue defects)
+* Original GST bill available
+* Valid order exists in Stride sales records
 
-### Resolution Outcome
-- Repair must be Paid
-- Repair visit scheduled at outlet
-- Manual inspection required before repair acceptance
-- No refund or replacement under this policy
+**Ineligible Conditions (Any one applies):**
 
----
+* Damage caused by rough or improper use
+* Water damage, cuts, burns, or intentional damage
 
-## Repair Policy
+**Resolution Outcome:**
 
-### Eligibility Criteria
-- Warranty period valid (**6 months from billing date**)
-- Reported issue is repairable in nature
-- A valid order exists in Stride sales records
+* Mandatory outlet inspection
+* Replacement approved **only after staff verification**
+* Replacement subject to stock availability
 
-### Ineligible Conditions
-- Warranty period expired
-- Structural failure beyond feasible repair
-
-### Resolution Outcome
-- Repair visit scheduled at outlet
-- Manual inspection required before repair acceptance
-- No refund or replacement under this policy
+**Metadata for Automation:**
+* `decision`: 'approve'
+* `max_days`: 7
+* `min_days`: 0
+* `eligible_intents`: ['replacement_repair_request']
 
 ---
 
-## Refund Policy
+### Repair
 
-### Eligibility Criteria
-- Product is unused
-- Refund request submitted **within 7 days from billing date**
-- Original packaging and GST bill available
-- OR replacement unavailable (refund may be processed once stock confirmation is complete)
+**Eligibility (All must be satisfied):**
 
-### Ineligible Conditions
-- Used or worn footwear
-- Repair-related cases
-- Warranty claims
-- Refund requests raised after 7 days
+* Warranty period valid (**up to 6 months / 180 days** from billing date)
+* Product is outside the 7-day Return/Replacement window
+* Issue is **repairable**
+* Valid order exists in Stride sales records
 
-### Resolution Outcome
-- Refund considered **only after physical inspection**
-- Refund is not guaranteed until inspection approval
+**Ineligible Conditions (Any one applies):**
 
----
+* Warranty expired
+* Structural failure beyond feasible repair
 
-## Inspection Policy
+**Resolution Outcome:**
 
-### Trigger Conditions
-- Conflicting or incomplete customer information
-- Emotional or unclear complaint descriptions
-- Heavy typographical errors leading to ambiguity
-- Multiple prior tickets associated with the same order
+* Repair visit scheduled at outlet
+* Manual inspection required before repair approval
+* No refund or replacement under this policy
 
-### Resolution Outcome
-- Manual inspection ticket generated
-- Staff review required
-- Ticket validity: **7 calendar days**
-- No automated approval or rejection
+**Metadata for Automation:**
+* `decision`: 'approve'
+* `max_days`: 180
+* `min_days`: 8
+* `eligible_intents`: ['replacement_repair_request']
 
 ---
 
-# Reject Policy
+### Paid_Repair
 
-Claims shall be rejected if the request falls outside all eligible policy windows,
-including but not limited to return, refund, replacement, or repair periods.
+**Eligibility (All must be satisfied):**
 
-Requests explicitly seeking return or refund beyond the permitted duration
-are not eligible for inspection or paid services and must be rejected.
+* Warranty period expired (**more than 6 months / 180 days** from billing date)
+* Issue is **repairable**
+* Valid order exists in Stride sales records
 
-Examples include:
-- Return requested after the return window
-- Refund requested after refund window
-- Product used beyond warranty with no repair request
+**Ineligible Conditions:**
 
+* Structural failure beyond feasible repair
 
----
+**Resolution Outcome:**
 
-## Mandatory Assistant Restrictions
+* Paid repair required
+* Repair visit scheduled at outlet
+* Manual inspection required before repair acceptance
+* No refund or replacement under this policy
 
-The complaint-handling assistant must **never**:
-
-- Promise or guarantee refunds, replacements, or repairs
-- Request or accept images, videos, or external evidence
-- Override or modify sales, inventory, or warranty records
-- Perform inventory or order updates
-- Admit fault or legal liability on behalf of Stride
-
-These restrictions override all other instructions.
+**Metadata for Automation:**
+* `decision`: 'approve'
+* `max_days`: None
+* `min_days`: 181
+* `eligible_intents`: ['paid_repair','replacement_repair_request']
 
 ---
 
-## Decision Output Requirement
+### Inspection
 
-Each complaint interaction must conclude with **exactly one** of the following outcomes:
+**Trigger Conditions:**
 
-- **APPROVED – VISIT SCHEDULED**
-- **REJECTED – POLICY VIOLATION**
-- **TICKET GENERATED – MANUAL REVIEW**
+* Conflicting or incomplete customer information
+* Ambiguous or unclear complaint description
+* Heavy typographical errors
+* Multiple prior tickets for the same order
 
-This decision is logged for audit and staff review.
+**Resolution Outcome:**
+
+* Manual inspection ticket generated
+* Staff review required
+* Ticket validity: **7 calendar days**
+* No automated approval or rejection
+
+**Metadata for Automation:**
+* `decision`: 'manual'
+* `max_days`: None
+* `min_days`: 0
+* `eligible_intents`: ['inspection_request']
 
 ---
 
-## Tone & Communication Guidelines
+### Reject
 
-- Polite, calm, and professional at all times
-- Neutral and factual language
-- Clear reference to applicable policy rules
-- No emotional commitments or legal admissions
+**Trigger Conditions:**
 
-Example:
-> “I understand your concern. Based on our policy, this request requires an in-store inspection for further evaluation.”
+* The request does not qualify under any active policy window (return, refund, replacement, warranty repair, or paid repair).
+* Return or refund explicitly requested beyond the permitted time window.
+* Request intent is incompatible with product condition or policy eligibility.
+* Evidence of intentional or deliberate damage.
+* Product is beyond warranty and no repair (paid or warranty) is applicable.
+* The complaint fails to meet the eligibility criteria of all defined policies.
 
----
+**Resolution Outcome:**
+
+* Claim is automatically rejected for the requested intent.
+* No inspection or paid service is offered **for expired return or refund requests**.
+* Rejected tickets are closed with a clear reason code.
+
+**Metadata for Automation:**
+* `decision`: 'reject'
+* `max_days`: null
+* `min_days`: null
+* `eligible_intents`: ['return_refund_request','replacement_repair_request','paid_repair','unknown_request']

@@ -14,6 +14,8 @@ services:
     volumes:
       - ./Logs:/app/Logs
       - ./Models:/app/Models
+    networks:
+      - stride-network
 
   stride-db:
     image: postgres:16
@@ -27,6 +29,25 @@ services:
       - "5432:5432"
     volumes:
       - stride-db-data:/var/lib/postgresql/data
+    networks:
+      - stride-network
+
+  # Optional Redis service for caching
+  stride-redis:
+    image: redis:7
+    container_name: stride-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - stride-redis-data:/data
+    networks:
+      - stride-network
 
 volumes:
   stride-db-data:
+  stride-redis-data:
+
+networks:
+  stride-network:
+    driver: bridge

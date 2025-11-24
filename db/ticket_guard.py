@@ -2,8 +2,7 @@
 # ==========================================
 # STRIDE – TICKET VALIDATION & CREATION GUARD
 # ==========================================
-
-from db.inventory import check_inventory
+from cache.inventory import is_inventory_available
 from db.tickets import has_active_ticket, create_ticket
 from Services.logger_config import logger  # Import logger
 
@@ -51,7 +50,7 @@ def process_ticket(order_ticket_ctx: dict) -> dict:
         final_notes = notes
 
         if decision == "REPLACEMENT":
-            if not check_inventory(
+            if not is_inventory_available(
                 product_id=order_ticket_ctx["product_id"],
                 outlet_id=order_ticket_ctx["outlet_id"],
                 size=order_ticket_ctx["size"]

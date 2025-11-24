@@ -24,12 +24,11 @@ if not SECRET_KEY:
     logger.error(f"Error updating ticket: JWT_SECRET_KEY not set in environment variables", exc_info=True)    
     raise RuntimeError("JWT_SECRET_KEY not set in environment variables")
 
-
+router = APIRouter(prefix="/staff", tags=["Staff"])
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 8
 ISSUER = "stride-staff-service"
 
-router = APIRouter(prefix="/staff", tags=["Staff"])
 security = HTTPBearer()
 
 # =====================================================

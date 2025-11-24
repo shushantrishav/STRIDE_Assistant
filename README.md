@@ -1,4 +1,5 @@
 # STRIDE – Intelligent Complaint Resolution System
+
 ---
 
 ## Problem Statement
@@ -16,7 +17,7 @@ This project implements a **Retrieval-Augmented Generation (RAG) pipeline** for 
 * **Decision engine:** Determines eligibility, enforces policy, and generates actionable outcomes.
 * **Ticketing system:** Creates, updates, and tracks complaint tickets in PostgreSQL.
 * **Audit logging:** Immutable logging of all staff actions for compliance.
-* **LLM integration:** Uses Mistral-7B-Instruct for generating human-readable responses to customers.
+* **LLM integration:** Uses Ollama / Mistral LLMs for generating human-readable responses to customers.
 
 The system ensures **strict adherence to company policy**, automates repetitive checks, and provides staff with clear next steps.
 
@@ -68,65 +69,38 @@ The system ensures **strict adherence to company policy**, automates repetitive 
 ## Architecture
 
 ```plaintext
-                 +------------------------+
-                 | Customer Message       |
-                 +-----------+------------+
-                             |
-                             v
-                 +------------------------+
-                 | Session Initiation     |
-                 |  - Verify order        |
-                 |  - Verify phone number |
-                 |  - Issue JWT token     |
-                 +-----------+------------+
-                             |
-                             v
-                  +--------------------+
-                  | Semantic Analyzer  |
-                  |  (Intent Detection)|
-                  +---------+----------+
-                             |
-                             v
+                 +-------------------+
+                 | Customer Message  |
+                 +---------+---------+
+                           |
+                           v
+                  +-------------------+
+                  | Semantic Analyzer | <--- INTENT Detection
+                  +---------+---------+
+                           |
+                           v
                  +--------------------+
-                 | Clarification Step |
-                 |  (Ask customer to  |
-                 |   clarify message) |
+                 | Policy Retriever   | <--- Fetch relevant policy chunk
                  +---------+----------+
-                             |
-                             v
+                           |
+                           v
                  +--------------------+
-                 | Policy Retriever   |
-                 |  (Fetch relevant   |
-                 |   policy chunks)   |
+                 | Decision Engine    | <--- Enforce policy rules
                  +---------+----------+
-                             |
-                             v
-                 +--------------------+
-                 | Decision Engine    |
-                 |  (Enforce policy   |
-                 |   rules / scoring) |
-                 +---------+----------+
-                             |
-                             v
-                 +-----------------------+
-                 | Log Customer Message  |
-                 +-----------+-----------+
-                             |
-                 +-----------+-----------+
-                 |                       |
-                 v                       v
+                           |
+               +-----------+-----------+
+               |                       |
+               v                       v
       +----------------+       +------------------+
-      | APPROVED /     |       | MANUAL REVIEW    |
-      | REJECTED       |       +--------+---------+
-      +--------+-------+                |
-               |                        v
-               v                 Ticket Created
-     Staff Notification                 |
+      | APPROVED / REJECT |     | MANUAL REVIEW   |
+      +--------+---------+     +--------+---------+
+               |                        |
+               v                        v
+         Staff Notification         Ticket Created
                |                        |
                +-----------+------------+
                            v
                    Customer Response
-
 ```
 
 ---
@@ -158,7 +132,7 @@ The system ensures **strict adherence to company policy**, automates repetitive 
 
 ```env
 # --- Environment Variables for Model Configuration ---
-MODEL_PATH=PATH_TO_Mistral-7B-Instruct-v0.3-Q6_K.gguf
+MODEL_PATH=PATH_TO_LLM_MODEL.gguf
 
 # --- MODEL Setup ---
 CONTEXT_SIZE=CONTEXT_SIZE
@@ -175,7 +149,6 @@ DB_PORT=<DB_PORT>
 
 # ----------------JWT KEY----------------------------
 JWT_SECRET_KEY=YOUR_JWT_SECRET_KEY
-
 ```
 
 4. Tables:
@@ -190,7 +163,6 @@ JWT_SECRET_KEY=YOUR_JWT_SECRET_KEY
 ---
 
 ## Quick Start
-[Download Mistral-7B-Instruct-v0.3 here](https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.3)
 
 ```bash
 # Clone repository
@@ -206,7 +178,7 @@ venv\Scripts\activate     # Windows
 pip install -r requirements.txt
 
 # Place LLM model
-`Models/Mistral-7B-Instruct-v0.3-Q6_K.gguf`
+Models/LLM_MODEL.gguf
 
 # Run FastAPI
 uvicorn main:app --reload
@@ -242,7 +214,7 @@ curl http://localhost:8000/
 * **Configuration Management:** `.env` files and secrets management.
 * **Rate Limiting & Auth:** JWT-based staff authentication.
 * **Scalability:** Separate API routers, stateless endpoints, and database connection pooling.
-* **Disable Docs Entirely:** `app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)`
+
 ---
 
 ## Deployment

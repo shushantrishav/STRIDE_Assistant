@@ -1,60 +1,41 @@
-# ==========================================
-# STRIDE – EMBEDDER
-# Single source of truth for embeddings
-# ==========================================
+# ==============================================================================
+# STRIDE – EMBEDDER LAYER
+# Single source of truth for text vectorization
+# ==============================================================================
 
 from sentence_transformers import SentenceTransformer
 import numpy as np
 from typing import List, Union
-from Services.logger_config import logger  # import logger
+from Services.logger_config import logger
 
-# ------------------------------------------
-# Load embedding model ONCE
-# ------------------------------------------
+# Using a lightweight, high-performance model
 EMBED_MODEL_NAME = "all-MiniLM-L6-v2"
 
 try:
+    # Load model once at the module level
     _embed_model = SentenceTransformer(EMBED_MODEL_NAME)
-    logger.info(f"Embedder model '{EMBED_MODEL_NAME}' loaded successfully")
+    logger.info(f"Embedder initialized: '{EMBED_MODEL_NAME}'")
 except Exception as e:
-    logger.error(f"Error loading embedder model '{EMBED_MODEL_NAME}': {e}", exc_info=True)
+    logger.error(f"Failed to load Embedder: {e}", exc_info=True)
     raise
 
-# ------------------------------------------
-# Public API
-# ------------------------------------------
-def embed_text(
-    text: Union[str, List[str]]
-) -> Union[List[float], List[List[float]]]:
+def embed_text(text: Union[str, List[str]]) -> Union[List[float], List[List[float]]]:
     """
-    Generate embeddings for text or list of texts.
-    Returns Python lists (JSON serializable).
+    Converts text into normalized vector embeddings.
+    Returns: JSON serializable Python list(s).
     """
     try:
-        embeddings = _embed_model.encode(
-            text,
-            normalize_embeddings=True
-        )
-
-        if isinstance(text, list):
-            logger.info(f"Generated embeddings for list of {len(text)} texts")
-            return embeddings.tolist()
-
-        logger.info("Generated embeddings for single text")
+        # normalize_embeddings=True ensures cosine similarity is just a dot product
+        embeddings = _embed_model.encode(text, normalize_embeddings=True)
         return embeddings.tolist()
-
     except Exception as e:
-        logger.error(f"Error generating embeddings for text '{text}': {e}", exc_info=True)
-        if isinstance(text, list):
-            return [[] for _ in text]
-        return []
+        logger.error(f"Embedding error: {e}")
+        return [] if isinstance(text, str) else [[] for _ in text]
 
-# ------------------------------------------
-# Utility
-# ------------------------------------------
-def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
+def cosine_similarity(v1: List[float], v2: List[float]) -> float:
+    """Calculates semantic closeness (0 to 1)."""
     try:
+        a, b = np.array(v1), np.array(v2)
         return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
-    except Exception as e:
-        logger.warning(f"Cosine similarity calculation failed: {e}", exc_info=True)
+    except Exception:
         return 0.0

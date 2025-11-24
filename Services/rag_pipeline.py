@@ -1,49 +1,83 @@
 import uuid
 from collections import Counter
-from db.inventory import get_inventory_for_product
-from db.tickets import create_ticket
-from rag.retriever import retrieve_policy_chunks
+from typing import Dict, Any
+from cache.inventory import is_inventory_available, prefetch_inventory
+from cache.orders import get_order_from_cache
+from rag.retriever import retrieve_policy
 from rag.decision_engine import StrideDecisionEngine
 from rag.semantic_analyzer import analyze
-from Services.logger_config import logger  # import logger
+from Services.prompt_builder import StridePromptBuilder
+from Services.logger_config import logger
 
-class RAGPipeline:
+
+class STRIDERAGPipeline:
     """
-    STRIDE RAG PIPELINE
+    STRIDE RAG PIPELINE (Cache + Policy-Grounded + Decision-Aware)
 
-    Retriever  -> observes intent (policy hint)
-    Engine     -> enforces rules (authoritative)
-    Pipeline   -> arbitrates + commits ticket
+    Responsibilities:
+    - Retrieve relevant policies
+    - Enforce decision engine rules
+    - Prefetch and validate inventory
+    - Load order + customer data from Redis cache
+    - Generate LLM-ready prompt
+    - Resolve final ticket using arbitration
     """
 
-    def __init__(self, order: dict):
-        self.order = order
+    def __init__(self, order_id: str, brand_name="Stride"):
+        self.order_id = order_id
         self.engine = StrideDecisionEngine()
+        self.prompt_builder = StridePromptBuilder(brand_name)
         self.turn_count = 0
-        self.signals: list[str] = []  # Signals: [retriever_T1, engine_T1, retriever_T2, engine_T2]
+        self.signals: list[str] = []
         self.inventory_available: bool | None = None
         self.ticket_created = False
-        logger.info(f"RAGPipeline initialized for order {order.get('order_id')}")
+        self.order: dict = self._load_order()
+        logger.info(f"STRIDERAGPipeline initialized for order {order_id}")
 
     # -------------------------------------------------
-    # Inventory check
+    # Load order + customer from Redis cache
+    # -------------------------------------------------
+    def _load_order(self) -> dict:
+        order = get_order_from_cache(self.order_id)
+        if order:
+            logger.info(f"Order loaded from cache: {self.order_id}")
+        else:
+            logger.warning(f"Order {self.order_id} not found in cache")
+            order = {}
+        return order
+
+    # -------------------------------------------------
+    # Inventory prefetch and check
     # -------------------------------------------------
     def check_inventory(self) -> bool:
+        """
+        Check if replacement inventory is available for the order.
+        """
         try:
-            row = get_inventory_for_product(
+            logger.debug(f"Checking inventory for order {self.order_id}")
+
+            available = is_inventory_available(
                 self.order["outlet_id"],
                 self.order["product_id"],
                 self.order["size"],
             )
-            available = row is not None and row[3] > 0
-            logger.info(f"Inventory check: {'available' if available else 'unavailable'}")
+
+            logger.info(
+                f"Inventory check: {'available' if available else 'unavailable'} "
+                f"(order_id={self.order_id})"
+            )
+
             return available
+
         except Exception as e:
-            logger.error(f"Error checking inventory: {e}", exc_info=True)
+            logger.error(
+                f"Error checking inventory for order {self.order_id}: {e}",
+                exc_info=True,
+            )
             return False
 
     # -------------------------------------------------
-    # Signal resolution (AUTHORITATIVE LOGIC)
+    # Authoritative signal arbitration
     # -------------------------------------------------
     def resolve_final_ticket(self) -> str:
         try:
@@ -52,20 +86,15 @@ class RAGPipeline:
 
             if unique == {"REJECT"}:
                 return "REJECT"
-            
             if counts.get("REJECT", 0) == 2 and len(self.signals) == 4:
                 non_reject = [s for s in self.signals if s != "REJECT"]
                 return Counter(non_reject).most_common(1)[0][0]
-
             if len(unique) == 1:
                 return self.signals[0]
-
             if unique.issubset({"REPAIR", "INSPECTION"}):
                 return "REPAIR" if counts["REPAIR"] >= 3 else "INSPECTION"
-
             if unique == {"RETURN", "REPLACEMENT"}:
                 return "REPLACEMENT"
-
             if "PAID_REPAIR" in counts and counts["PAID_REPAIR"] == len(self.signals):
                 return "PAID_REPAIR"
 
@@ -75,51 +104,91 @@ class RAGPipeline:
             return "INSPECTION"
 
     # -------------------------------------------------
-    # Conversation turn handler
+    # Build prompt for LLM
     # -------------------------------------------------
-    def process_turn(self, user_text: str) -> dict:
-        self.turn_count += 1
-        try:
-            # RETRIEVER
-            policy_chunks = retrieve_policy_chunks(user_text, self.order)
-            retriever_signal = policy_chunks[0]["policy_type"].upper()
-            self.signals.append(retriever_signal)
+    def build_llm_prompt(
+        self,
+        user_query: str,
+        decision: Dict[str, Any],
+        needs_clarification: bool = False,
+    ) -> str:
+        return self.prompt_builder.build_final_prompt(
+            user_query=user_query,
+            decision=decision,
+            needs_clarification=needs_clarification,
+            turn_count=self.turn_count,
+        )
 
-            # DECISION ENGINE
-            self.inventory_available = self.check_inventory()
+    # -------------------------------------------------
+    # Process a conversation turn
+    # -------------------------------------------------
+    def process_turn(self, user_text: str) -> Dict[str, Any]:
+        # Prefetch inventory (5-min TTL)
+        prefetch_inventory(
+            self.order.get("outlet_id"),
+            self.order.get("product_id"),
+            self.order.get("size"),
+        )
+
+        self.turn_count += 1
+
+        try:
+            # Analyze user input
             analysis = analyze(user_text)
 
+            # Retrieve policy chunks
+            policy_chunks = retrieve_policy(
+                user_query=user_text,
+                predicted_intent=analysis.get("category", ""),
+                order_data=self.order,
+            )
+            retriever_signal = (
+                policy_chunks["policy_type"].upper() if policy_chunks else "INSPECTION"
+            )
+            self.signals.append(retriever_signal)
+
+            # Decision Engine
+            self.inventory_available = self.check_inventory()
             engine_result = self.engine.make_decision(
                 order_data=self.order,
                 analysis=analysis,
                 inventory_available=self.inventory_available,
                 turn_count=self.turn_count,
             )
-
-            raw_engine_ticket = engine_result.get("ticket_type")
-            engine_signal = raw_engine_ticket.upper() if raw_engine_ticket else "INSPECTION"
+            engine_signal = engine_result.get("ticket_type", "INSPECTION").upper()
             self.signals.append(engine_signal)
 
-            logger.info(f"Turn {self.turn_count}: Retriever={retriever_signal}, Engine={engine_signal}, Inventory={'yes' if self.inventory_available else 'no'}")
+            logger.info(
+                f"Turn {self.turn_count}: Retriever={retriever_signal}, Engine={engine_signal}, Inventory={'yes' if self.inventory_available else 'no'}"
+            )
 
-            # CLARIFICATION (ONLY ONCE)
+            # Clarification stage (only first turn)
             if self.turn_count == 1:
+                llm_prompt = self.build_llm_prompt(
+                    user_query=user_text,
+                    decision=engine_result,
+                    needs_clarification=True,
+                )
                 return {
                     "needs_clarification": True,
-                    "ai_message": "Could you please explain the issue in a bit more detail?",
+                    "ai_message": llm_prompt,
                     "signals": self.signals,
                     "turn_count": self.turn_count,
                 }
 
-            # FINAL ARBITRATION
+            # Final arbitration
             final_ticket = self.resolve_final_ticket()
 
             # Inventory safety override
             if final_ticket == "REPLACEMENT" and not self.inventory_available:
                 final_ticket = "INSPECTION"
 
+            # Generate LLM prompt (human-friendly explanation)
+            llm_prompt = self.build_llm_prompt(user_query=user_text,decision=engine_result)
+
             return {
                 "final_ticket": final_ticket,
+                "llm_prompt": llm_prompt,
                 "signals": self.signals,
                 "turn_count": self.turn_count,
                 "decision_reason": engine_result.get("reason"),
@@ -129,6 +198,7 @@ class RAGPipeline:
             logger.error(f"Error processing turn {self.turn_count}: {e}", exc_info=True)
             return {
                 "final_ticket": "INSPECTION",
+                "llm_prompt": "Fallback: manual inspection required.",
                 "signals": self.signals,
                 "turn_count": self.turn_count,
                 "decision_reason": "Error occurred, fallback to manual inspection",
