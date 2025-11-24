@@ -1,0 +1,66 @@
+# -----------------------------
+# Python
+# -----------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+*.env
+*.venv
+.env.*
+venv/
+venv3/
+env/
+ENV/
+local_env/
+
+# -----------------------------
+# Logs
+# -----------------------------
+Logs/
+*.log
+
+# -----------------------------
+# Database / Local Files
+# -----------------------------
+stride.db
+*.sqlite3
+*.db
+*.db-journal
+
+# -----------------------------
+# Model Files
+# -----------------------------
+Models/
+*.gguf
+*.bin
+*.pt
+*.ckpt
+*.safetensors
+
+# -----------------------------
+# IDE / Editor Specific
+# -----------------------------
+.vscode/
+.idea/
+*.iml
+*.sublime-project
+*.sublime-workspace
+
+# -----------------------------
+# OS Files
+# -----------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# -----------------------------
+# Temporary / Build Files
+# -----------------------------
+*.tmp
+*.swp
+*.bak
+*.old
+*.log.*
