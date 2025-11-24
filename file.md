@@ -1,4 +1,5 @@
 # STRIDE – Intelligent Complaint Resolution System
+
 ---
 
 ## Problem Statement
@@ -130,25 +131,11 @@ The system ensures **strict adherence to company policy**, automates repetitive 
 3. Create `.env` with:
 
 ```env
-# --- Environment Variables for Model Configuration ---
-MODEL_PATH=PATH_TO_Mistral-7B-Instruct-v0.3-Q6_K.gguf
-
-# --- MODEL Setup ---
-CONTEXT_SIZE=CONTEXT_SIZE
-BATCH_SIZE=BATCH_SIZE
-UPDATE_BATCH_SIZE=UPDATE_BATCH_SIZE
-VERBOSE=TRUE/FALSE
-
-# --- Connection Parameters ---
-DB_NAME=<DB_NAME>
-DB_USER=<DB_USER>
-DB_PASSWORD=<DB_PASSWORD>
-DB_HOST=<DB_HOST>
-DB_PORT=<DB_PORT>
-
-# ----------------JWT KEY----------------------------
-JWT_SECRET_KEY=YOUR_JWT_SECRET_KEY
-
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=stride_user
+DB_PASS=yourpassword
+DB_NAME=stride_db
 ```
 
 4. Tables:
@@ -178,9 +165,7 @@ venv\Scripts\activate     # Windows
 pip install -r requirements.txt
 
 # Place LLM model
-`Models/Mistral-7B-Instruct-v0.3-Q6_K.gguf`
-
-[Download Mistral-7B-Instruct-v0.3 here](https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.3)
+# Models/Mistral-7B-Instruct-v0.3-Q6_K.gguf
 
 # Run FastAPI
 uvicorn main:app --reload
@@ -298,6 +283,14 @@ CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 
    * Prioritize tickets based on urgency, complaint type, and customer history.
 
+7. **Unit & Integration Testing**
+
+   * Pytest-based tests for RAG pipeline, API, and database interactions.
+
+8. **Deployment & CI/CD**
+
+   * Dockerized application with environment separation for staging and production.
+
 ---
 
 ## Contribution Guidelines
@@ -309,13 +302,14 @@ CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 ---
 
-## Contributions & Support
+## License
 
-Contributions, issues, and feature requests are welcome.
-Feel free to open an issue or submit a pull request.
+This project is proprietary to STRIDE. Unauthorized use or distribution is prohibited.
 
 ---
 
 ## Contact
 
-* Project Maintainer: [Shushant Rishav](https://github.com/shushantrishav)
+* Project Maintainer: STRIDE Internal AI Team
+* Email: [ai-support@stride.com](mailto:ai-support@stride.com)
+* Git Repository: `<internal_repo_url>`

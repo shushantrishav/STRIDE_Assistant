@@ -1,0 +1,29 @@
+# Web & API
+fastapi
+uvicorn
+
+# PostgreSQL DB
+psycopg
+psycopg_pool
+secrets
+
+# Data & Utilities
+python-dotenv
+numpy
+
+# LLM
+llama_cpp
+
+# RAG / NLP
+sentence-transformers
+torch
+transformers
+scikit-learn
+
+# Logging
+logging
+contextlib
+
+# Optional (for typing / dev)
+pydantic
+
