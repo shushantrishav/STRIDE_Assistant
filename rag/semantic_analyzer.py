@@ -1,200 +1,85 @@
-# ==========================================
-# STRIDE – DYNAMIC INTENT + SIGNAL + CATEGORY ANALYZER
-# ==========================================
-
-import re
+import ollama
 import json
-import numpy as np
-from pathlib import Path
-from sentence_transformers import SentenceTransformer
-from Services.logger_config import logger
-
-# ------------------------------------------
-# Load embedding model
-# ------------------------------------------
-try:
-    embed_model = SentenceTransformer("all-MiniLM-L6-v2")
-    logger.info("Stride embedding model loaded successfully")
-except Exception as e:
-    logger.error(f"Embedding model load failed: {e}", exc_info=True)
-    raise
-
-# ------------------------------------------
-# Load configuration
-# ------------------------------------------
-CONFIG_PATH = Path("config/analyzer_config.json")
-
-try:
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        CONFIG = json.load(f)
-
-    INTENTS = CONFIG.get("intents", {})
-    SIGNALS = CONFIG.get("signals", {})
-
-    logger.info("Analyzer configuration loaded")
-except Exception as e:
-    logger.error(f"Failed to load config: {e}", exc_info=True)
-    raise
-
-# ------------------------------------------
-# Precompute embeddings
-# ------------------------------------------
-try:
-    INTENT_EMBEDDINGS = {
-        intent: embed_model.encode(phrases)
-        for intent, phrases in INTENTS.items()
-    }
-
-    SIGNAL_EMBEDDINGS = {
-        signal: embed_model.encode(phrases)
-        for signal, phrases in SIGNALS.items()
-    }
-
-    logger.info("Intent and signal embeddings computed")
-except Exception as e:
-    logger.error(f"Embedding computation failed: {e}", exc_info=True)
-    raise
-
-# ------------------------------------------
-# Utilities
-# ------------------------------------------
-def cosine_similarity(a, b):
-    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
 
-def extract_days(text: str):
-    match = re.search(r"(\d+)\s*(day|days)", text.lower())
-    return int(match.group(1)) if match else None
-
-
-# ------------------------------------------
-# Intent detection
-# ------------------------------------------
-def detect_intent(text: str, threshold: float = 0.35):
-    query_vec = embed_model.encode(text)
-
-    best_intent = "anything"
-    best_score = 0.0
-
-    for intent, vectors in INTENT_EMBEDDINGS.items():
-        for v in vectors:
-            score = cosine_similarity(query_vec, v)
-            if score > best_score:
-                best_score = score
-                best_intent = intent
-
-    if best_score < threshold:
-        return "inspection_request", float(best_score)
-
-    return best_intent, float(best_score)
-
-
-# ------------------------------------------
-# Signal detection
-# ------------------------------------------
-def detect_signals(text: str):
-    query_vec = embed_model.encode(text)
-
-    detected = {
-        "manufacturing_defect": False,
-        "misuse_or_wear": False,
-        "intentional_damage": False,
-    }
-
-    thresholds = {
-        "manufacturing_defect": 0.55,
-        "misuse_or_wear": 0.50,
-        "intentional_damage": 0.65,
-    }
-
-    priority = [
-        "manufacturing_defect",
-        "intentional_damage",
-        "misuse_or_wear",
-    ]
-
-    for signal in priority:
-        for v in SIGNAL_EMBEDDINGS.get(signal, []):
-            if cosine_similarity(query_vec, v) >= thresholds[signal]:
-                detected[signal] = True
-                return detected
-
-    return detected
-
-
-# ------------------------------------------
-# Category determination (FIXED)
-# ------------------------------------------
-def categorize_request(intent: str, signals: dict, confidence: float):
-    """
-    Final business categorization layer.
-    Intents are preserved.
-    Signals only decide cost responsibility.
-    """
-    DOMAIN_CONFIDENCE_THRESHOLD = 0.30
-
-    # 🚫 0️⃣ Completely unrelated / unknown
-    if confidence < DOMAIN_CONFIDENCE_THRESHOLD:
-        return "unknown_request"
-
-    # Paid repair has highest priority
-    if (
-        intent == "paid_repair_request"
-        or signals.get("intentional_damage")
-        or signals.get("misuse_or_wear")
+class StrideIntentAnalyser:
+    def __init__(
+        self,
+        model: str = "llama3.2:3b",
+        temperature: float = 0.0,
     ):
-        return "paid_repair_request"
+        self.model = model
+        self.temperature = temperature
+        self.system_prompt = """
+    You are a shoe support intent classifier. Analyze the user text and return ONLY a JSON object.
+    You have to check Does this text describe damage caused by a pet, an accident, or user misuse?.
+    and then classify them into one of these Categories:
+    - refund_request: Money back.
+    - return_request: Sending product back (fit/style).
+    - replacement_request: Wanting a new pair of the same shoe.
+    - repair_request: Fix for manufacturing defects.
+    - inspection_request: Damage due to manhandle, misuse, or accidents.
+    - general_chat: Greetings or small  or anything else apart from context of shoe.
 
-    # Return / refund
-    if intent in {"return_request", "refund_request"}:
-        return "return_refund_request"
+    Output Schema:
+    {
+        "intent": "string",
+        "confidence": "integer (0-100)",
+        "reason": "short explanation of why this category was chosen",
+        "misuse_or_accident": "boolean"
+    }
+    """
 
-    # Manufacturing defect → free repair / replacement
-    if signals.get("manufacturing_defect"):
-        return "replacement_repair_request"
+    def generate_response(self, user_query: str):
+        response = ollama.generate(
+            model=self.model,
+            system=self.system_prompt,
+            prompt=f"User text: '{user_query}'",
+            format="json",
+            options={"temperature": self.temperature},
+        )
+        return json.loads(response["response"])
 
-    # Any repair / replacement intent defaults to free evaluation
-    if intent in {"repair_request", "replacement_request"}:
-        return "replacement_repair_request"
+    def analyse(self, user_text: str):
+        # Step 1: Get desired intent
+        intent_data = self.generate_response(user_query=user_text)
+        final_intent = intent_data.get("intent", "general_chat")
+        misuse_data = bool(intent_data.get("misuse_or_accident", False))
+        confidence = int(intent_data.get("confidence", 0))
+        reason = intent_data.get("reason", "No reason provided")
 
-    # Low confidence or unclear
-    if confidence < 0.35 or intent in {"inspection_request", "anything"}:
-        return "inspection_request"
+        if final_intent in {"refund_request", "return_request"}:
+            return {
+                "primary_intent": final_intent,
+                "intent": "return_refund_request",
+                "confidence": confidence,
+                "misuse_or_accident": misuse_data,
+                "reason": reason,
+            }
 
-    return "inspection_request"
+        if final_intent in {"repair_request", "replacement_request"}:
+            return {
+                "primary_intent": final_intent,
+                "intent": "replacement_repair_request",
+                "confidence": confidence,
+                "misuse_or_accident": misuse_data,
+                "reason": reason,
+            }
 
+        # Correct override logic
+        if final_intent not in {"inspection_request", "general_chat"} and misuse_data:
+            return {
+                "primary_intent": "inspection_request",
+                "intent": "inspection_request",
+                "confidence": confidence,
+                "misuse_or_accident": misuse_data,
+                "reason": f"Override: User requested {final_intent}, but damage was flagged as misuse",
+            }
 
-# ------------------------------------------
-# Public Analyzer API
-# ------------------------------------------
-def analyze(user_text: str) -> dict:
-    try:
-        intent, confidence = detect_intent(user_text)
-        days_claimed = extract_days(user_text)
-        signals = detect_signals(user_text)
-        category = categorize_request(intent, signals, confidence)
-
-        result = {
-            "primary_intent": intent,
-            "intent_confidence": round(confidence, 3),
-            "days_claimed": days_claimed,
-            "signals": signals,
-            "category": category,
-        }
-
-        logger.info(f"Stride analysis for '{user_text}': {result}")
-        return result
-
-    except Exception as e:
-        logger.error(f"Analyzer failure: {e}", exc_info=True)
         return {
-            "primary_intent": "inspection_request",
-            "intent_confidence": 0.0,
-            "days_claimed": None,
-            "signals": {
-                "manufacturing_defect": False,
-                "misuse_or_wear": False,
-                "intentional_damage": False,
-            },
-            "category": "inspection_request",
+            "primary_intent": final_intent,
+            "intent": final_intent,
+            "confidence": confidence,
+            "misuse_or_accident": misuse_data,
+            "reason": reason,
         }

@@ -41,7 +41,10 @@ def retrieve_policy(user_query: str, predicted_intent: str, order_data: dict):
     candidates = []
     for row in rows:
         meta = json.loads(row['metadata'])
-        
+        print("eligible intent: ",meta.get("eligible_intents", []))
+        print(predicted_intent)
+        print("intent in list : ", predicted_intent in meta.get("eligible_intents", []))
+
         # Day bounds
         min_days = meta.get("min_days", 0)
         max_days = meta.get("max_days")

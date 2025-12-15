@@ -16,6 +16,51 @@ class StridePromptBuilder:
         self.brand_name = brand_name
         logger.info(f"StridePromptBuilder initialized for brand: {brand_name}")
 
+    def build_welcome_prompt(self, customer_name: str, order_id: str) -> str:
+        """
+        Greeting for successful authentication.
+        """
+        return f"""
+Hello {customer_name}! Welcome to Stride Support. I'm here to help you with any issues you're experiencing with your order {order_id}. Could you please describe the issue you're facing?
+"""
+
+    def build_general_prompt_handler(self, turn_count:str):
+        if turn_count == 1:
+            return f"""
+            Role: STRIDE Support Assistant.
+            Context: The user has engaged in casual conversation.
+            Task: Politely acknowledge the user but strictly pivot to support.
+            Required TEXT Output:
+                string
+        """
+        if turn_count >= 2:
+            return """
+                Role: STRIDE Support Assistant.
+                Context: The user is continuing off-topic conversation after being redirected once.
+                Task: Be firm. Inform the user that the session will be terminated since an order issue is not provided.
+                Required TEXT Output:
+                    string    
+            """
+
+    def build_ticket_exists_prompt(self, customer_name: str, order_id: str) -> str:
+        """
+        Prompt when a ticket already exists for the order.
+        """
+        return f"""
+You are a customer service assistant for a {self.brand_name}.
+
+You MUST respond with ONLY a valid text.
+Do NOT include explanations, markdown, or additional text.
+
+Message requirements:
+- Greet customer with hi, hello , hey.
+- Address the customer by name: "{customer_name}"
+- Inform them that a support ticket already exists for their Order ID "{order_id}"
+- Be polite, professional, and reassuring
+- Clearly state that the case is under review
+- Mention that an update will be provided within 7 business days
+"""
+
     def _get_system_instructions(self) -> str:
         return f"""
 You are the AI Receptionist for {self.brand_name}, a high-end footwear brand.

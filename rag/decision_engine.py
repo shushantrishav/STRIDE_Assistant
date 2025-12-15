@@ -31,8 +31,7 @@ class StrideDecisionEngine:
             # Extract data from analyzer + order
             # -------------------------------------
             primary_intent = analysis.get("primary_intent")
-            signals = analysis.get("signals", {})
-            category = analysis.get("category")
+            signals = analysis.get("misuse_or_accident")
             purchase_date = order_data.get("purchase_date")
 
             if isinstance(purchase_date, str):
@@ -41,23 +40,23 @@ class StrideDecisionEngine:
             days_used = (date.today() - purchase_date).days
 
             # ---------------------------------------------------------
-            # RULE -1: OUT-OF-DOMAIN / UNKNOWN REQUEST
+            # RULE -1: REJECT 
             # ---------------------------------------------------------
-            if category == "unknown_request":
+            if primary_intent == "general_chat":
                 result = {
-                    "decision": "reject",
-                    "action": "out_of_scope",
-                    "ticket_type": "Reject",
-                    "reason": "Request is outside customer support scope.",
-                    "generate_ticket": False,
-                }
+                        "decision": "reject",
+                        "action": "policy_rejection",
+                        "ticket_type": "Reject",
+                        "reason": "The message doesnot follow any policy.",
+                        "generate_ticket": False,
+                    }
                 logger.info(f"Decision made for order {order_data.get('order_id')}: {result}")
                 return result
 
             # ---------------------------------------------------------
             # RULE 0: MISUSE / WEAR & TEAR / INTENTIONAL DAMAGE
             # ---------------------------------------------------------
-            if signals.get("misuse_or_wear") or signals.get("intentional_damage"):
+            if signals:
                 if days_used <= 180:
                     result = {
                         "decision": "approve",
@@ -81,7 +80,7 @@ class StrideDecisionEngine:
             # ---------------------------------------------------------
             # RULE 1: RETURNS / REFUNDS / REPLACEMENTS (≤7 days)
             # ---------------------------------------------------------
-            if primary_intent in ["refund_request", "return_request", "replacement_request"]:
+            if primary_intent in ["refund_request", "return_request"]:
                 if days_used > 7:
                     result = {
                         "decision": "reject",
@@ -90,26 +89,6 @@ class StrideDecisionEngine:
                         "reason": f"Request for {primary_intent} after days used {days_used} days. Policy limit is 7 days.",
                         "generate_ticket": False,
                     }
-                    logger.info(f"Decision made for order {order_data.get('order_id')}: {result}")
-                    return result
-
-                if primary_intent == "replacement_request":
-                    if inventory_available:
-                        result = {
-                            "decision": "approve",
-                            "action": "replacement_authorized",
-                            "ticket_type": "Replacement",
-                            "reason": "Replacement within 7 days approved. Stock confirmed.",
-                            "generate_ticket": True,
-                        }
-                    else:
-                        result = {
-                            "decision": "manual",
-                            "action": "stock_out_inspection",
-                            "ticket_type": "Inspection",
-                            "reason": "Replacement eligible but stock unavailable. Manual Assistance required.",
-                            "generate_ticket": True,
-                        }
                     logger.info(f"Decision made for order {order_data.get('order_id')}: {result}")
                     return result
 
@@ -127,7 +106,7 @@ class StrideDecisionEngine:
             # ---------------------------------------------------------
             # RULE 2: REPAIR / MANUFACTURING DEFECT
             # ---------------------------------------------------------
-            if primary_intent in ["repair_request", "replacement_request"] or signals.get("manufacturing_defect"):
+            if primary_intent in ["repair_request", "replacement_request"]:
                 if days_used <= 7:
                     if inventory_available:
                         result = {

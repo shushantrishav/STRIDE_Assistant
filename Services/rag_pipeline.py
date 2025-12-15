@@ -5,7 +5,7 @@ from cache.inventory import is_inventory_available, prefetch_inventory
 from cache.orders import get_order_from_cache
 from rag.retriever import retrieve_policy
 from rag.decision_engine import StrideDecisionEngine
-from rag.semantic_analyzer import analyze
+from rag.semantic_analyzer import StrideIntentAnalyser
 from Services.prompt_builder import StridePromptBuilder
 from Services.logger_config import logger
 
@@ -27,7 +27,9 @@ class STRIDERAGPipeline:
         self.order_id = order_id
         self.engine = StrideDecisionEngine()
         self.prompt_builder = StridePromptBuilder(brand_name)
+        self.analyzer = StrideIntentAnalyser()
         self.turn_count = 0
+        self.general_chat_count: int = 0
         self.signals: list[str] = []
         self.inventory_available: bool | None = None
         self.ticket_created = False
@@ -123,23 +125,53 @@ class STRIDERAGPipeline:
     # Process a conversation turn
     # -------------------------------------------------
     def process_turn(self, user_text: str) -> Dict[str, Any]:
-        # Prefetch inventory (5-min TTL)
-        prefetch_inventory(
-            self.order.get("outlet_id"),
-            self.order.get("product_id"),
-            self.order.get("size"),
-        )
-
-        self.turn_count += 1
 
         try:
             # Analyze user input
-            analysis = analyze(user_text)
+            analysis = self.analyzer.analyse(user_text)
+
+            if analysis.get("intent") == "general_chat":
+                self.general_chat_count += 1
+
+                # If 2 consecutive general chats, close the chat
+                if self.general_chat_count >= 2:
+                    return {
+                        "final_ticket": "GCD",
+                        "ai_message": "I am an automated support system for STRIDE. If you do not have an order-related issue to report, I will have to terminate this chat session to keep the line open for other customers.",
+                        "signals": self.signals,
+                        "turn_count": self.turn_count,
+                        "decision_reason": "Repeated general chat",
+                        "chat_closed": True,
+                    }
+
+                # Otherwise, politely redirect
+                else:
+                    return {
+                        "final_ticket": "GCD",
+                        "ai_message": "I am the STRIDE Support Assistant, and I'm dedicated to helping you with order or product issues. Do you have a specific problem with a STRIDE purchase I can help you with?",
+                        "signals": self.signals,
+                        "turn_count": self.turn_count,
+                        "decision_reason": "General chat detected",
+                        "chat_closed": False,
+                    }
+
+            else:
+                # Reset counter if user provides a real query
+                self.general_chat_count = 0
+
+            # Prefetch inventory (5-min TTL)
+            prefetch_inventory(
+                self.order.get("outlet_id"),
+                self.order.get("product_id"),
+                self.order.get("size"),
+            )
+
+            self.turn_count += 1
 
             # Retrieve policy chunks
             policy_chunks = retrieve_policy(
                 user_query=user_text,
-                predicted_intent=analysis.get("category", ""),
+                predicted_intent=analysis.get("intent"),
                 order_data=self.order,
             )
             retriever_signal = (
@@ -170,6 +202,7 @@ class STRIDERAGPipeline:
                     needs_clarification=True,
                 )
                 return {
+                    "final_ticket": "T1",
                     "needs_clarification": True,
                     "ai_message": llm_prompt,
                     "signals": self.signals,
@@ -184,11 +217,13 @@ class STRIDERAGPipeline:
                 final_ticket = "INSPECTION"
 
             # Generate LLM prompt (human-friendly explanation)
-            llm_prompt = self.build_llm_prompt(user_query=user_text,decision=engine_result)
+            llm_prompt = self.build_llm_prompt(
+                user_query=user_text, decision=engine_result
+            )
 
             return {
                 "final_ticket": final_ticket,
-                "llm_prompt": llm_prompt,
+                "ai_message": llm_prompt,
                 "signals": self.signals,
                 "turn_count": self.turn_count,
                 "decision_reason": engine_result.get("reason"),
@@ -198,7 +233,7 @@ class STRIDERAGPipeline:
             logger.error(f"Error processing turn {self.turn_count}: {e}", exc_info=True)
             return {
                 "final_ticket": "INSPECTION",
-                "llm_prompt": "Fallback: manual inspection required.",
+                "ai_message": "Fallback: manual inspection required.",
                 "signals": self.signals,
                 "turn_count": self.turn_count,
                 "decision_reason": "Error occurred, fallback to manual inspection",

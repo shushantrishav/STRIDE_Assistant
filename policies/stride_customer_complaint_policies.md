@@ -55,7 +55,7 @@
 * `decision`: 'approve'
 * `max_days`: 7
 * `min_days`: 0
-* `eligible_intents`: ['replacement_repair_request']
+* `eligible_intents`: ['replacement_repair_request','inspection_request']
 
 ---
 
@@ -83,7 +83,7 @@
 * `decision`: 'approve'
 * `max_days`: 180
 * `min_days`: 8
-* `eligible_intents`: ['replacement_repair_request']
+* `eligible_intents`: ['replacement_repair_request','inspection_request']
 
 ---
 
@@ -110,7 +110,7 @@
 * `decision`: 'approve'
 * `max_days`: None
 * `min_days`: 181
-* `eligible_intents`: ['paid_repair','replacement_repair_request']
+* `eligible_intents`: ['paid_repair','replacement_repair_request','inspection_request']
 
 ---
 
@@ -159,4 +159,4 @@
 * `decision`: 'reject'
 * `max_days`: null
 * `min_days`: null
-* `eligible_intents`: ['return_refund_request','replacement_repair_request','paid_repair','unknown_request']
+* `eligible_intents`: ['return_refund_request','replacement_repair_request','paid_repair','general_chat']
