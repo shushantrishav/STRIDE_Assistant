@@ -35,7 +35,7 @@ class RAGPipeline:
                 self.order["product_id"],
                 self.order["size"],
             )
-            available = row is not None and row["quantity"] > 0
+            available = row is not None and row[3] > 0
             logger.info(f"Inventory check: {'available' if available else 'unavailable'}")
             return available
         except Exception as e:

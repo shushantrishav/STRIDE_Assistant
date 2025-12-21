@@ -17,7 +17,7 @@ DB_HOST = os.getenv("DB_HOST")
 DB_NAME = os.getenv("DB_NAME")
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
-DB_PORT = os.getenv("DB_PORT", "5432")
+DB_PORT = os.getenv("DB_PORT")
 
 # ---------------------------------------------------
 # Build connection URL
@@ -46,7 +46,9 @@ def get_connection():
                 cur.execute(...)
     """
     try:
-        return pool.connection()
+        conn = pool.connection()
+        conn.row_factory = dict_row
+        return conn
     except Exception as e:
         logger.error(f"Error acquiring connection from pool: {e}", exc_info=True)
         raise

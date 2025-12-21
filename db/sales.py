@@ -1,14 +1,11 @@
 # db/sales.py
-# ---------------------------------------------------
-# sales database controller
-# ---------------------------------------------------
-from db.postgres import get_connection
-from Services.logger_config import logger  # Import logger
+from db.postgres import get_connection, dict_row
+from Services.logger_config import logger
 
-def get_order_by_id(order_id: str):
+def get_order_by_id(order_id: str) -> dict | None:
     """
     Fetch order details along with customer contact info.
-    Used for complaint session validation and RAG context.
+    Returns a dictionary with column names as keys.
     """
     query = """
         SELECT
@@ -32,11 +29,11 @@ def get_order_by_id(order_id: str):
     """
     try:
         with get_connection() as conn:
-            with conn.cursor() as cur:
+            with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(query, (order_id,))
                 result = cur.fetchone()
                 if result:
-                    logger.info(f"Order fetched successfully: {order_id}")
+                    logger.info(f"Order fetched successfully: order_id={order_id}")
                 else:
                     logger.warning(f"No order found with ID: {order_id}")
                 return result
