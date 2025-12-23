@@ -215,7 +215,7 @@ curl http://localhost:8000/
 * **Configuration Management:** `.env` files and secrets management.
 * **Rate Limiting & Auth:** JWT-based staff authentication.
 * **Scalability:** Separate API routers, stateless endpoints, and database connection pooling.
-
+* **Disable Docs Entirely:** `app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)`
 ---
 
 ## Deployment
