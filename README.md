@@ -68,38 +68,65 @@ The system ensures **strict adherence to company policy**, automates repetitive 
 ## Architecture
 
 ```plaintext
-                 +-------------------+
-                 | Customer Message  |
-                 +---------+---------+
-                           |
-                           v
-                  +-------------------+
-                  | Semantic Analyzer | <--- INTENT Detection
-                  +---------+---------+
-                           |
-                           v
+                 +------------------------+
+                 | Customer Message       |
+                 +-----------+------------+
+                             |
+                             v
+                 +------------------------+
+                 | Session Initiation     |
+                 |  - Verify order        |
+                 |  - Verify phone number |
+                 |  - Issue JWT token     |
+                 +-----------+------------+
+                             |
+                             v
+                  +--------------------+
+                  | Semantic Analyzer  |
+                  |  (Intent Detection)|
+                  +---------+----------+
+                             |
+                             v
                  +--------------------+
-                 | Policy Retriever   | <--- Fetch relevant policy chunk
+                 | Clarification Step |
+                 |  (Ask customer to  |
+                 |   clarify message) |
                  +---------+----------+
-                           |
-                           v
+                             |
+                             v
                  +--------------------+
-                 | Decision Engine    | <--- Enforce policy rules
+                 | Policy Retriever   |
+                 |  (Fetch relevant   |
+                 |   policy chunks)   |
                  +---------+----------+
-                           |
-               +-----------+-----------+
-               |                       |
-               v                       v
+                             |
+                             v
+                 +--------------------+
+                 | Decision Engine    |
+                 |  (Enforce policy   |
+                 |   rules / scoring) |
+                 +---------+----------+
+                             |
+                             v
+                 +-----------------------+
+                 | Log Customer Message  |
+                 +-----------+-----------+
+                             |
+                 +-----------+-----------+
+                 |                       |
+                 v                       v
       +----------------+       +------------------+
-      | APPROVED / REJECT |     | MANUAL REVIEW   |
-      +--------+---------+     +--------+---------+
-               |                        |
-               v                        v
-         Staff Notification         Ticket Created
+      | APPROVED /     |       | MANUAL REVIEW    |
+      | REJECTED       |       +--------+---------+
+      +--------+-------+                |
+               |                        v
+               v                 Ticket Created
+     Staff Notification                 |
                |                        |
                +-----------+------------+
                            v
                    Customer Response
+
 ```
 
 ---
