@@ -163,6 +163,7 @@ JWT_SECRET_KEY=YOUR_JWT_SECRET_KEY
 ---
 
 ## Quick Start
+[Download Mistral-7B-Instruct-v0.3 here](https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.3)
 
 ```bash
 # Clone repository
@@ -179,8 +180,6 @@ pip install -r requirements.txt
 
 # Place LLM model
 `Models/Mistral-7B-Instruct-v0.3-Q6_K.gguf`
-
-[Download Mistral-7B-Instruct-v0.3 here](https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.3)
 
 # Run FastAPI
 uvicorn main:app --reload
