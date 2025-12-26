@@ -1,53 +1,73 @@
+# docker-compose.yml
 version: "3.9"
 
 services:
   stride-api:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: stride-api
-    restart: unless-stopped
-    env_file:
-      - .env
     ports:
       - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # Make the app talk to the compose services (env-first config is used by redis client). [file:10]
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+
+      # If your Ollama client needs explicit host configuration in code, add it here.
+      # OLLAMA_HOST: http://ollama:11434
+      PYTHONUNBUFFERED: "1"
     depends_on:
-      - stride-db
+      - redis
+      - postgres
+      - ollama
     volumes:
       - ./Logs:/app/Logs
-      - ./Models:/app/Models
-    networks:
-      - stride-network
-
-  stride-db:
-    image: postgres:16
-    container_name: stride-db
+      - ./policies:/app/policies
     restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: stride-ollama
     ports:
-      - "5432:5432"
+      - "11434:11434"
     volumes:
-      - stride-db-data:/var/lib/postgresql/data
-    networks:
-      - stride-network
-
-  # Optional Redis service for caching
-  stride-redis:
-    image: redis:7
-    container_name: stride-redis
+      - ollama:/root/.ollama
     restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: stride-redis
     ports:
       - "6379:6379"
+    # Your redis client supports username/password (Redis ACL). [file:10]
+    # This config enables requirepass; ACL user creation can be added via a redis.conf for full username support.
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-stride_password}"]
+    environment:
+      # Used mainly for documentation; redis itself reads password from command above.
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-stride_password}
     volumes:
-      - stride-redis-data:/data
-    networks:
-      - stride-network
+      - redis:/data
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: stride-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ${DB_NAME:-stride}
+      POSTGRES_USER: ${DB_USER:-stride}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-stride}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    restart: unless-stopped
 
 volumes:
-  stride-db-data:
-  stride-redis-data:
-
-networks:
-  stride-network:
-    driver: bridge
+  ollama:
+  redis:
+  postgres:

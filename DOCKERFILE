@@ -1,16 +1,31 @@
 # =====================================
-# STRIDE – Dockerfile for FastAPI API
+# STRIDE – Dockerfile (FastAPI API)
+# Production-friendly (no --reload), smaller, safer defaults
 # =====================================
 
-# Use official Python 3.11 slim image
-FROM python:3.11-slim
+FROM python:3.11-slim AS runtime
 
 # ---------------------------
 # Environment variables
 # ---------------------------
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV PIP_NO_CACHE_DIR=1
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# ---------------------------
+# System dependencies
+# (Keep minimal; add build tools only if your requirements need compilation)
+# ---------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------
+# Create non-root user
+# ---------------------------
+RUN useradd -m -u 10001 appuser
 
 # ---------------------------
 # Set working directory
@@ -18,29 +33,20 @@ ENV PIP_NO_CACHE_DIR=1
 WORKDIR /app
 
 # ---------------------------
-# Install system dependencies
+# Install Python dependencies (cache-friendly)
 # ---------------------------
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    git \
-    wget \
-    curl \
-    libgl1 \
-    && rm -rf /var/lib/apt/lists/*
+COPY requirements.txt /app/requirements.txt
+RUN pip install --upgrade pip && pip install -r /app/requirements.txt
 
 # ---------------------------
-# Copy requirements first (cache layer)
+# Copy application code
 # ---------------------------
-COPY requirements.txt .
+COPY . /app
 
-# Upgrade pip and install dependencies
-RUN pip install --upgrade pip
-RUN pip install --no-cache-dir -r requirements.txt
+# Ensure writable dirs exist (logs, etc.)
+RUN mkdir -p /app/Logs && chown -R appuser:appuser /app
 
-# ---------------------------
-# Copy full project into container
-# ---------------------------
-COPY . .
+USER appuser
 
 # ---------------------------
 # Expose FastAPI port
@@ -48,11 +54,14 @@ COPY . .
 EXPOSE 8000
 
 # ---------------------------
-# Optional: prefetch orders/inventory on startup (if needed)
+# Healthcheck (hits your / endpoint)
 # ---------------------------
-# CMD ["python", "Scripts/prefetch_orders.py"]  
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD curl -fsS http://localhost:8000/ || exit 1
 
 # ---------------------------
 # Startup command
+# Use 1 worker for local demo; scale via compose/infra later.
+# (Avoid --reload inside containers.)
 # ---------------------------
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

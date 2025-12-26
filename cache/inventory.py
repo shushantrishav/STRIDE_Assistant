@@ -5,7 +5,7 @@
 import json
 from typing import Optional, Union
 
-from Services.redis_client import client as redis
+from cache.redis_client import client as redis
 from Services.logger_config import logger
 from db.inventory import get_inventory_for_product as db_get_inventory
 
@@ -79,7 +79,7 @@ def get_inventory_cached(outlet_id: str, product_id: str, size: int) -> Optional
 
     cache_key = _inventory_cache_key(outlet_id, product_id, size)
 
-    # 1️⃣ Try Redis
+    # Try Redis
     try:
         cached = redis.get(cache_key)
         if cached:
@@ -92,14 +92,14 @@ def get_inventory_cached(outlet_id: str, product_id: str, size: int) -> Optional
 
     logger.info(f"[CACHE MISS] Inventory {cache_key}")
 
-    # 2️⃣ Fallback to DB
+    # Fallback to DB
     row = db_get_inventory(outlet_id, product_id, size)
     if not row:
         return None
 
     inventory = _normalize_inventory(row)
 
-    # 3️⃣ Store normalized dict in Redis
+    # Store normalized dict in Redis
     try:
         redis.set(
             cache_key,

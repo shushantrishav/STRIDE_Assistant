@@ -6,7 +6,7 @@ import json
 from datetime import date, datetime
 from db.postgres import get_connection, dict_row
 from Services.logger_config import logger
-from Services.redis_client import client as redis
+from cache.redis_client import client as redis
 from typing import Optional, Dict
 from decimal import Decimal
 

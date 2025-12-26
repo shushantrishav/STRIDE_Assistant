@@ -1,6 +1,11 @@
-import uuid
+# rag_pipeline.py
+from __future__ import annotations
+
 from collections import Counter
-from typing import Dict, Any
+from dataclasses import dataclass
+from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
+
 from cache.inventory import is_inventory_available, prefetch_inventory
 from cache.orders import get_order_from_cache
 from rag.retriever import retrieve_policy
@@ -10,110 +15,346 @@ from Services.prompt_builder import StridePromptBuilder
 from Services.logger_config import logger
 
 
+class TicketSignal(str, Enum):
+    REJECT = "REJECT"
+    INSPECTION = "INSPECTION"
+    REPAIR = "REPAIR"
+    RETURN = "RETURN"
+    REPLACEMENT = "REPLACEMENT"
+    PAID_REPAIR = "PAID_REPAIR"
+
+
+class PipelineFinalTicket(str, Enum):
+    # Clarification / conversation control
+    CLARIFICATION = "T1"
+    GENERAL_CHAT = "GCD"
+
+    # Real outcomes
+    REJECT = "REJECT"
+    INSPECTION = "INSPECTION"
+    REPAIR = "REPAIR"
+    RETURN = "RETURN"
+    REPLACEMENT = "REPLACEMENT"
+    PAID_REPAIR = "PAID_REPAIR"
+
+
+@dataclass(frozen=True)
+class PipelineSignal:
+    source: str  # "retriever" | "engine"
+    value: TicketSignal
+    turn: int
+    confidence: Optional[float] = None  # e.g., retriever match_score
+
+
 class STRIDERAGPipeline:
     """
     STRIDE RAG PIPELINE (Cache + Policy-Grounded + Decision-Aware)
 
-    Responsibilities:
-    - Retrieve relevant policies
-    - Enforce decision engine rules
-    - Prefetch and validate inventory
-    - Load order + customer data from Redis cache
-    - Generate LLM-ready prompt
-    - Resolve final ticket using arbitration
+    SRP-oriented responsibilities:
+    - Load order context
+    - Handle general chat routing
+    - Prefetch/check inventory
+    - Run retrieval (instinct)
+    - Run decision engine (logic)
+    - Arbitrate signals across turns
+    - Build LLM prompt
     """
 
-    def __init__(self, order_id: str, brand_name="Stride"):
+    def __init__(self, order_id: str, brand_name: str = "Stride") -> None:
         self.order_id = order_id
+        self.brand_name = brand_name
+
         self.engine = StrideDecisionEngine()
         self.prompt_builder = StridePromptBuilder(brand_name)
         self.analyzer = StrideIntentAnalyser()
+
         self.turn_count = 0
-        self.general_chat_count: int = 0
-        self.signals: list[str] = []
-        self.inventory_available: bool | None = None
-        self.ticket_created = False
-        self.order: dict = self._load_order()
-        logger.info(f"STRIDERAGPipeline initialized for order {order_id}")
+        self.general_chat_count = 0
 
-    # -------------------------------------------------
-    # Load order + customer from Redis cache
-    # -------------------------------------------------
-    def _load_order(self) -> dict:
-        order = get_order_from_cache(self.order_id)
-        if order:
-            logger.info(f"Order loaded from cache: {self.order_id}")
-        else:
-            logger.warning(f"Order {self.order_id} not found in cache")
-            order = {}
-        return order
+        self.order: Dict[str, Any] = self._load_order()
+        self.inventory_available: Optional[bool] = None
 
-    # -------------------------------------------------
-    # Inventory prefetch and check
-    # -------------------------------------------------
-    def check_inventory(self) -> bool:
+        self.signals: List[PipelineSignal] = []
+
+        logger.info(f"STRIDERAGPipeline initialized for order_id={order_id}")
+
+    # -----------------------------
+    # Public API
+    # -----------------------------
+    def process_turn(self, user_text: str) -> Dict[str, Any]:
         """
-        Check if replacement inventory is available for the order.
+        Returns a dict compatible with your existing API layer:
+        - final_ticket
+        - ai_message
+        - signals
+        - turn_count
+        - decision_reason
+        - (optional) needs_clarification, chat_closed
         """
         try:
-            logger.debug(f"Checking inventory for order {self.order_id}")
+            analysis = self._analyse_user_text(user_text)
 
-            available = is_inventory_available(
-                self.order["outlet_id"],
-                self.order["product_id"],
-                self.order["size"],
+            general_chat_response = self._handle_general_chat_if_needed(analysis)
+            if general_chat_response is not None:
+                return general_chat_response
+
+            if not self._has_minimum_order_context():
+                return self._manual_fallback(
+                    reason="Order not found or missing required fields (outlet_id/product_id/size)."
+                )
+
+            self.turn_count += 1
+
+            # Inventory
+            self._prefetch_inventory()
+            self.inventory_available = self._check_inventory_safe()
+
+            # Instinct (retriever)
+            retriever_signal, retriever_score = self._run_retriever(user_text, analysis)
+            self._record_signal(
+                source="retriever",
+                signal=retriever_signal,
+                confidence=retriever_score,
             )
+
+            # Logic (engine)
+            engine_result = self._run_decision_engine(analysis)
+            engine_signal = self._normalize_signal(engine_result.get("ticket_type"))
+            self._record_signal(source="engine", signal=engine_signal, confidence=None)
 
             logger.info(
-                f"Inventory check: {'available' if available else 'unavailable'} "
-                f"(order_id={self.order_id})"
+                "Turn %s: retriever=%s(score=%s), engine=%s, inventory=%s",
+                self.turn_count,
+                retriever_signal.value,
+                retriever_score,
+                engine_signal.value,
+                "yes" if self.inventory_available else "no",
             )
 
-            return available
+            # Clarification stage: do NOT arbitrate yet
+            if self.turn_count == 1:
+                prompt = self._build_llm_prompt(
+                    user_query=user_text,
+                    decision=engine_result,
+                    needs_clarification=True,
+                )
+                return {
+                    "final_ticket": PipelineFinalTicket.CLARIFICATION.value,
+                    "needs_clarification": True,
+                    "ai_message": prompt,
+                    "signals": self._signals_for_response(),
+                    "turn_count": self.turn_count,
+                }
+
+            final_ticket = self._resolve_final_ticket()
+
+            # Safety override: replacement requires inventory
+            if final_ticket == TicketSignal.REPLACEMENT and not self.inventory_available:
+                final_ticket = TicketSignal.INSPECTION
+
+            prompt = self._build_llm_prompt(user_query=user_text, decision=engine_result)
+
+            return {
+                "final_ticket": final_ticket.value,
+                "ai_message": prompt,
+                "signals": self._signals_for_response(),
+                "turn_count": self.turn_count,
+                "decision_reason": engine_result.get("reason"),
+            }
 
         except Exception as e:
-            logger.error(
-                f"Error checking inventory for order {self.order_id}: {e}",
-                exc_info=True,
+            logger.error(f"Error processing turn {self.turn_count}: {e}", exc_info=True)
+            return self._manual_fallback(reason="Error occurred, fallback to manual inspection.")
+
+    # -----------------------------
+    # Order / inventory helpers
+    # -----------------------------
+    def _load_order(self) -> Dict[str, Any]:
+        order = get_order_from_cache(self.order_id)
+        if order:
+            logger.info(f"Order loaded from cache: order_id={self.order_id}")
+            return order
+        logger.warning(f"Order not found in cache: order_id={self.order_id}")
+        return {}
+
+    def _has_minimum_order_context(self) -> bool:
+        required = ("outlet_id", "product_id", "size")
+        return all(self.order.get(k) for k in required)
+
+    def _prefetch_inventory(self) -> None:
+        prefetch_inventory(
+            self.order.get("outlet_id"),
+            self.order.get("product_id"),
+            self.order.get("size"),
+        )
+
+    def _check_inventory_safe(self) -> bool:
+        try:
+            return is_inventory_available(
+                self.order.get("outlet_id"),
+                self.order.get("product_id"),
+                self.order.get("size"),
             )
+        except Exception as e:
+            logger.error(f"Inventory check failed for order_id={self.order_id}: {e}", exc_info=True)
             return False
 
-    # -------------------------------------------------
-    # Authoritative signal arbitration
-    # -------------------------------------------------
-    def resolve_final_ticket(self) -> str:
+    # -----------------------------
+    # NLP / chat control
+    # -----------------------------
+    def _analyse_user_text(self, user_text: str) -> Dict[str, Any]:
+        return self.analyzer.analyse(user_text)
+
+    def _handle_general_chat_if_needed(self, analysis: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if analysis.get("intent") != "general_chat":
+            self.general_chat_count = 0
+            return None
+
+        self.general_chat_count += 1
+
+        if self.general_chat_count >= 2:
+            return {
+                "final_ticket": PipelineFinalTicket.GENERAL_CHAT.value,
+                "ai_message": (
+                    "I am an automated support system for STRIDE. If you do not have an order-related "
+                    "issue to report, I will have to terminate this chat session to keep the line open "
+                    "for other customers."
+                ),
+                "signals": self._signals_for_response(),
+                "turn_count": self.turn_count,
+                "decision_reason": "Repeated general chat",
+                "chat_closed": True,
+            }
+
+        return {
+            "final_ticket": PipelineFinalTicket.GENERAL_CHAT.value,
+            "ai_message": (
+                "I am the STRIDE Support Assistant, and I'm dedicated to helping you with order or "
+                "product issues. Do you have a specific problem with a STRIDE purchase I can help you with?"
+            ),
+            "signals": self._signals_for_response(),
+            "turn_count": self.turn_count,
+            "decision_reason": "General chat detected",
+            "chat_closed": False,
+        }
+
+    # -----------------------------
+    # Retriever (instinct)
+    # -----------------------------
+    def _run_retriever(self, user_text: str, analysis: Dict[str, Any]) -> Tuple[TicketSignal, Optional[float]]:
+        policy = retrieve_policy(
+            user_query=user_text,
+            predicted_intent=analysis.get("intent"),
+            order_data=self.order,
+        )
+        if not policy:
+            return TicketSignal.INSPECTION, None
+
+        policy_type = str(policy.get("policy_type", "")).upper()
+        match_score = policy.get("match_score")
+
+        # Map policy types into canonical signals
+        mapped = self._normalize_signal(policy_type)
+        return mapped, float(match_score) if match_score is not None else None
+
+    # -----------------------------
+    # Decision engine (logic)
+    # -----------------------------
+    def _run_decision_engine(self, analysis: Dict[str, Any]) -> Dict[str, Any]:
+        return self.engine.make_decision(
+            order_data=self.order,
+            analysis=analysis,
+            inventory_available=bool(self.inventory_available),
+            turn_count=self.turn_count,
+        )
+
+    # -----------------------------
+    # Signals + arbitration
+    # -----------------------------
+    def _record_signal(self, source: str, signal: TicketSignal, confidence: Optional[float]) -> None:
+        self.signals.append(
+            PipelineSignal(source=source, value=signal, turn=self.turn_count, confidence=confidence)
+        )
+
+    def _signals_for_response(self) -> List[Dict[str, Any]]:
+        return [
+            {"source": s.source, "value": s.value.value, "turn": s.turn, "confidence": s.confidence}
+            for s in self.signals
+        ]
+
+    def _resolve_final_ticket(self) -> TicketSignal:
+        """
+        Engine-weighted arbitration:
+        - engine vote weight = 2
+        - retriever vote weight = 1
+        """
         try:
-            counts = Counter(self.signals)
-            unique = set(self.signals)
+            weighted_votes: List[str] = []
+            for s in self.signals:
+                weight = 2 if s.source == "engine" else 1
+                weighted_votes.extend([s.value.value] * weight)
 
-            if unique == {"REJECT"}:
-                return "REJECT"
-            if counts.get("REJECT", 0) == 2 and len(self.signals) == 4:
-                non_reject = [s for s in self.signals if s != "REJECT"]
-                return Counter(non_reject).most_common(1)[0][0]
-            if len(unique) == 1:
-                return self.signals[0]
-            if unique.issubset({"REPAIR", "INSPECTION"}):
-                return "REPAIR" if counts["REPAIR"] >= 3 else "INSPECTION"
-            if unique == {"RETURN", "REPLACEMENT"}:
-                return "REPLACEMENT"
-            if "PAID_REPAIR" in counts and counts["PAID_REPAIR"] == len(self.signals):
-                return "PAID_REPAIR"
+            counts = Counter(weighted_votes)
+            unique = set(weighted_votes)
 
-            return counts.most_common(1)[0][0]
+            # Preserve your special-case logic, but on weighted votes
+            if unique == {TicketSignal.REJECT.value}:
+                return TicketSignal.REJECT
+
+            if unique.issubset({TicketSignal.REPAIR.value, TicketSignal.INSPECTION.value}):
+                return TicketSignal.REPAIR if counts[TicketSignal.REPAIR.value] >= 3 else TicketSignal.INSPECTION
+
+            if unique == {TicketSignal.RETURN.value, TicketSignal.REPLACEMENT.value}:
+                return TicketSignal.REPLACEMENT
+
+            # Strong unanimity for paid repair
+            if counts.get(TicketSignal.PAID_REPAIR.value, 0) == len(weighted_votes):
+                return TicketSignal.PAID_REPAIR
+
+            return TicketSignal(counts.most_common(1)[0][0])
+
         except Exception as e:
             logger.error(f"Error resolving final ticket: {e}", exc_info=True)
-            return "INSPECTION"
+            return TicketSignal.INSPECTION
 
-    # -------------------------------------------------
-    # Build prompt for LLM
-    # -------------------------------------------------
-    def build_llm_prompt(
-        self,
-        user_query: str,
-        decision: Dict[str, Any],
-        needs_clarification: bool = False,
-    ) -> str:
+    def _normalize_signal(self, raw: Any) -> TicketSignal:
+        """
+        Converts engine/retriever strings into canonical TicketSignal values.
+        Accepts variants like 'PaidRepair', 'PAID_REPAIR', 'Paid_Repair', etc.
+        """
+        if raw is None:
+            return TicketSignal.INSPECTION
+
+        text = str(raw).strip().upper().replace("-", "_").replace(" ", "_")
+        text = text.replace("__", "_")
+
+        # common aliases
+        aliases = {
+            "PAIDREPAIR": "PAID_REPAIR",
+            "PAID_REPAIR": "PAID_REPAIR",
+            "PAID__REPAIR": "PAID_REPAIR",
+            "INSPECT": "INSPECTION",
+        }
+        text = aliases.get(text, text)
+
+        # policy_type might be something like "RETURN POLICY"
+        if "RETURN" in text and "REPLAC" not in text:
+            return TicketSignal.RETURN
+        if "REPLAC" in text:
+            return TicketSignal.REPLACEMENT
+        if "REPAIR" in text and "PAID" in text:
+            return TicketSignal.PAID_REPAIR
+        if "REPAIR" in text:
+            return TicketSignal.REPAIR
+        if "REJECT" in text:
+            return TicketSignal.REJECT
+
+        return TicketSignal.INSPECTION
+
+    # -----------------------------
+    # Prompting + fallback
+    # -----------------------------
+    def _build_llm_prompt(self, user_query: str, decision: Dict[str, Any], needs_clarification: bool = False) -> str:
         return self.prompt_builder.build_final_prompt(
             user_query=user_query,
             decision=decision,
@@ -121,120 +362,11 @@ class STRIDERAGPipeline:
             turn_count=self.turn_count,
         )
 
-    # -------------------------------------------------
-    # Process a conversation turn
-    # -------------------------------------------------
-    def process_turn(self, user_text: str) -> Dict[str, Any]:
-
-        try:
-            # Analyze user input
-            analysis = self.analyzer.analyse(user_text)
-
-            if analysis.get("intent") == "general_chat":
-                self.general_chat_count += 1
-
-                # If 2 consecutive general chats, close the chat
-                if self.general_chat_count >= 2:
-                    return {
-                        "final_ticket": "GCD",
-                        "ai_message": "I am an automated support system for STRIDE. If you do not have an order-related issue to report, I will have to terminate this chat session to keep the line open for other customers.",
-                        "signals": self.signals,
-                        "turn_count": self.turn_count,
-                        "decision_reason": "Repeated general chat",
-                        "chat_closed": True,
-                    }
-
-                # Otherwise, politely redirect
-                else:
-                    return {
-                        "final_ticket": "GCD",
-                        "ai_message": "I am the STRIDE Support Assistant, and I'm dedicated to helping you with order or product issues. Do you have a specific problem with a STRIDE purchase I can help you with?",
-                        "signals": self.signals,
-                        "turn_count": self.turn_count,
-                        "decision_reason": "General chat detected",
-                        "chat_closed": False,
-                    }
-
-            else:
-                # Reset counter if user provides a real query
-                self.general_chat_count = 0
-
-            # Prefetch inventory (5-min TTL)
-            prefetch_inventory(
-                self.order.get("outlet_id"),
-                self.order.get("product_id"),
-                self.order.get("size"),
-            )
-
-            self.turn_count += 1
-
-            # Retrieve policy chunks
-            policy_chunks = retrieve_policy(
-                user_query=user_text,
-                predicted_intent=analysis.get("intent"),
-                order_data=self.order,
-            )
-            retriever_signal = (
-                policy_chunks["policy_type"].upper() if policy_chunks else "INSPECTION"
-            )
-            self.signals.append(retriever_signal)
-
-            # Decision Engine
-            self.inventory_available = self.check_inventory()
-            engine_result = self.engine.make_decision(
-                order_data=self.order,
-                analysis=analysis,
-                inventory_available=self.inventory_available,
-                turn_count=self.turn_count,
-            )
-            engine_signal = engine_result.get("ticket_type", "INSPECTION").upper()
-            self.signals.append(engine_signal)
-
-            logger.info(
-                f"Turn {self.turn_count}: Retriever={retriever_signal}, Engine={engine_signal}, Inventory={'yes' if self.inventory_available else 'no'}"
-            )
-
-            # Clarification stage (only first turn)
-            if self.turn_count == 1:
-                llm_prompt = self.build_llm_prompt(
-                    user_query=user_text,
-                    decision=engine_result,
-                    needs_clarification=True,
-                )
-                return {
-                    "final_ticket": "T1",
-                    "needs_clarification": True,
-                    "ai_message": llm_prompt,
-                    "signals": self.signals,
-                    "turn_count": self.turn_count,
-                }
-
-            # Final arbitration
-            final_ticket = self.resolve_final_ticket()
-
-            # Inventory safety override
-            if final_ticket == "REPLACEMENT" and not self.inventory_available:
-                final_ticket = "INSPECTION"
-
-            # Generate LLM prompt (human-friendly explanation)
-            llm_prompt = self.build_llm_prompt(
-                user_query=user_text, decision=engine_result
-            )
-
-            return {
-                "final_ticket": final_ticket,
-                "ai_message": llm_prompt,
-                "signals": self.signals,
-                "turn_count": self.turn_count,
-                "decision_reason": engine_result.get("reason"),
-            }
-
-        except Exception as e:
-            logger.error(f"Error processing turn {self.turn_count}: {e}", exc_info=True)
-            return {
-                "final_ticket": "INSPECTION",
-                "ai_message": "Fallback: manual inspection required.",
-                "signals": self.signals,
-                "turn_count": self.turn_count,
-                "decision_reason": "Error occurred, fallback to manual inspection",
-            }
+    def _manual_fallback(self, reason: str) -> Dict[str, Any]:
+        return {
+            "final_ticket": TicketSignal.INSPECTION.value,
+            "ai_message": "Fallback: manual inspection required.",
+            "signals": self._signals_for_response(),
+            "turn_count": self.turn_count,
+            "decision_reason": reason,
+        }

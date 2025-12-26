@@ -1,319 +1,241 @@
-# STRIDE – Intelligent Complaint Resolution System
+# STRIDE Assistant — Policy‑First Retail AI for Footwear Complaints (Backend + AI)
+
+STRIDE Assistant is a **backend-first AI system** for a premium footwear brand that automates complaint triage (return/refund, replacement, repair, paid repair, inspection, reject) using a **policy‑first RAG pipeline**.  
+It is designed to demonstrate production‑style backend engineering: clear service boundaries, deterministic decisioning, auditability, and safe LLM integration.
+
+> **Core idea:** The LLM helps with *language understanding and customer communication*, while the *decision authority* remains deterministic and policy-driven.
 
 ---
 
-## Problem Statement
+## Why this project
+Footwear complaint handling looks simple but isn’t: warranty windows, purchase dates, outlet constraints, stock availability, and misuse signals create a decision space where **speed + consistency + traceability** are hard requirements.
 
-Footwear companies often face high volumes of customer complaints related to returns, repairs, replacements, or refunds. Managing these requests manually is time-consuming, error-prone, and inconsistent across outlets. STRIDE requires a **policy-aware, automated complaint handling system** that can enforce warranty rules, detect eligibility, and assist staff in decision-making while maintaining complete auditability.
-
----
-
-## Project Overview
-
-This project implements a **Retrieval-Augmented Generation (RAG) pipeline** for STRIDE's complaint management, combining:
-
-* **Semantic analysis:** Detects complaint intent from customer messages.
-* **Policy retrieval:** Identifies applicable rules based on purchase date, warranty, and product type.
-* **Decision engine:** Determines eligibility, enforces policy, and generates actionable outcomes.
-* **Ticketing system:** Creates, updates, and tracks complaint tickets in PostgreSQL.
-* **Audit logging:** Immutable logging of all staff actions for compliance.
-* **LLM integration:** Uses Ollama / Mistral LLMs for generating human-readable responses to customers.
-
-The system ensures **strict adherence to company policy**, automates repetitive checks, and provides staff with clear next steps.
+This project shows how to:
+- Build a **reliable AI assistant** without hallucinated decisions.
+- Combine **RAG retrieval** with a **deterministic decision engine**.
+- Keep the system **auditable**, **safe**, and **maintainable**.
 
 ---
 
-## Key Features
-
-### 1. RAG Pipeline
-
-* **Retriever:** Maps natural language complaints to structured policy chunks.
-* **Decision Engine:** Applies strict window-based rules (returns, replacements, repairs, paid repairs).
-* **Arbitration:** Resolves conflicting signals from multiple system components.
-* **Ticket Handling:** Generates tickets for manual inspection or approved store visits.
-
-### 2. Policy Management
-
-* Policies stored in Markdown (`policies/stride_customer_complaint_policies.md`).
-* Deterministic retrieval ensures accurate policy application.
-* Supports updates and versioning through `ingest/ingest_policies.py`.
-
-### 3. Complaint Categories
-
-* **Return / Refund** (within 7 days, unused products).
-* **Replacement** (manufacturing defects, inventory available).
-* **Repair** (warranty and paid repair post-warranty).
-* **Inspection** (ambiguous complaints, missing data).
-* **Reject** (policy violation, misuse, expired warranty).
-
-### 4. Staff & Admin APIs
-
-* Staff login, ticket assignment, status updates.
-* Admin audit logs with immutable staff actions.
-* Outlet-based filtering and reporting.
-
-### 5. Logging & Observability
-
-* General and error logging (`Logs/llama.log`, `Logs/error.log`).
-* Staff actions logged via `db/staff_audit.py`.
-* Exception-safe database operations with logging.
-
-### 6. LLM Response Generation
-
-* Professional, polite system messages built via `Services/prompt_builder.py`.
-* Ensures consistent tone, avoids liability or promises.
-* Supports conversation turn limits to avoid indefinite dialogue loops.
+## Key features
+- **Policy‑First RAG Pipeline**
+  - Intent classification (LLM → structured JSON)
+  - Policy retrieval using embeddings + eligibility filtering
+  - Deterministic decision engine enforcing strict rules
+  - Signal arbitration + inventory safety overrides
+  - Turn limits + clarification flow to avoid infinite loops
+- **Backend Engineering**
+  - FastAPI service with modular routers (customer chat, staff, admin)
+  - JWT-based auth patterns (customer session and staff access)
+  - Redis caching for low-latency order/inventory access
+  - Postgres persistence for tickets + staff audit logs
+- **Operational Focus**
+  - Structured logging and failure-safe fallbacks
+  - Separation of concerns: retrieval ≠ decision ≠ language generation
 
 ---
 
-## Architecture
-
+## System diagram (end-to-end)
 ```plaintext
-                 +-------------------+
-                 | Customer Message  |
-                 +---------+---------+
-                           |
-                           v
-                  +-------------------+
-                  | Semantic Analyzer | <--- INTENT Detection
-                  +---------+---------+
-                           |
-                           v
-                 +--------------------+
-                 | Policy Retriever   | <--- Fetch relevant policy chunk
-                 +---------+----------+
-                           |
-                           v
-                 +--------------------+
-                 | Decision Engine    | <--- Enforce policy rules
-                 +---------+----------+
-                           |
-               +-----------+-----------+
-               |                       |
-               v                       v
-      +----------------+       +------------------+
-      | APPROVED / REJECT |     | MANUAL REVIEW   |
-      +--------+---------+     +--------+---------+
-               |                        |
-               v                        v
-         Staff Notification         Ticket Created
-               |                        |
-               +-----------+------------+
-                           v
-                   Customer Response
+                         +------------------------+
+                         | Customer / Chat UI     |
+                         | (Web, WhatsApp-like)   |
+                         +-----------+------------+
+                                     |
+                                     v
+                         +------------------------+
+                         | FastAPI Chat API       |
+                         | /chat/auth,start,respond|
+                         +-----------+------------+
+                                     |
+                                     v
+                     +-----------------------------------+
+                     | STRIDERAGPipeline (Orchestrator)  |
+                     | - turn mgmt + signal arbitration  |
+                     +-----------+-----------------------+
+                                 |
+                                 v
+                      +----------------------------+
+                      | Semantic Analyzer (LLM)    |
+                      | Intent + misuse/accident   |
+                      +-----------+----------------+
+                                  |
+                                  v
+                  +------------------------------------+
+                  | Policy Retriever (RAG)             |
+                  | - eligible intents + day windows   |
+                  | - semantic similarity over chunks  |
+                  +----------------+-------------------+
+                                   |
+                                   v
+                  +------------------------------------+
+                  | Decision Engine (Deterministic)    |
+                  | - returns/repairs/replacements     |
+                  | - warranty + misuse handling       |
+                  +------------------+-----------------+
+                                     |
+                                     v
+                 +-------------------+-------------------+
+                 |                                       |
+                 v                                       v
+   +---------------------------+                +--------+---------+
+   | Auto Outcome  (Ticket)    |                |   Reject Signal  |
+   | REPAIR / REPLACEMENT      |                |     GCD Token    |
+   | PAID_REPAIR / REJECT      |                +--------+---------+
+   |  INSPECTION / RETURN      |                         |
+   | Manual / Inspection       |                         v
+   +-------------+-------------+                +--------+---------+
+                 |                              |   Close Chat     |
+                 |                              +------------------+
+                 |                         
+                 |                         
+                 |                         
+                 |                                       
+                 +---------------------+
+                                       |
+                                       v
+                         +---------------------------+
+                         | Ticket Created / Updated  |
+                         | (Postgres)                |
+                         +-------------+-------------+
+                                       |
+                                       v
+                         +----------------------------+
+                         | Prompt Builder (Safe UX)   |
+                         | Policy-safe response text  |
+                         +-------------+--------------+
+                                       |
+                                       v
+                         +----------------------------+
+                         | Ollama LLM (Streaming)     |
+                         +-------------+--------------+
+                                       |
+                                       v
+                         +----------------------------+
+                         | Customer Response (SSE)    |
+                         +----------------------------+
+
+   Side services:
+   - Redis: cached orders + inventory lookups
+   - Postgres: tickets + staff audit logs + chat summaries
 ```
+## Tech stack
+- API: FastAPI (Python)
+- LLM runtime: Ollama (local/private inference)
+- Cache: Redis
+- Database: PostgreSQL
+- Policy RAG store: SQLite (policy chunks + embeddings) (can be upgraded to Postgres with versioning)
+- Embeddings: SentenceTransformers (e.g., MiniLM family)
+- Testing: pytest (unit tests + mocks)
 
----
-
-## Project Structure
-
-```plaintext
-./
-├── api/               # FastAPI routers (chat, staff, admin)
-├── db/                # PostgreSQL interactions, staff audit, tickets
-├── ingest/            # Policy ingestion scripts
-├── Logs/              # General and error logs
-├── main.py            # FastAPI entry point
-├── Models/            # LLM models
-├── policies/          # Policy documents
-├── rag/               # RAG pipeline components
-├── Scripts/           # Model initialization, utilities
-├── Services/          # Prompt builder, embedder, pipeline, logger config
-└── Web/               # Placeholder for frontend if needed
+## Repository structure
+```text
+├── api/                 # FastAPI routers (chat, staff, admin)
+├── cache/               # Redis-backed cache helpers (orders/inventory)
+├── db/                  # Postgres operations (tickets, audit, auth, chat)
+├── ingest/              # Policy ingestion scripts
+├── policies/            # Markdown policies (source of truth)
+├── rag/                 # analyzer, retriever, decision engine
+├── Services/            # prompt builder, logger, embedder utilities
+├── Logs/                # log files
+├── main.py              # FastAPI entrypoint
+└── README.md
 ```
+## How it works (decision philosophy)
+This system intentionally splits responsibilities:
+1) Semantic understanding (probabilistic)
+- The LLM is used to:
+   - interpret user text
+   - output structured intent JSON
+   - help produce professional customer messages
 
----
+2) Policy enforcement (deterministic)
+- The decision engine enforces:
+   - time windows (return/refund limits)
+   - warranty duration rules
+   - misuse / accident routing
+   - escalation when uncertain
+   - safety overrides (example: replacement blocked if inventory is unavailable)
 
-## Database Setup
+This architecture prevents “LLM as judge” failure modes and keeps outcomes explainable.
+## Ticket types
+The pipeline resolves requests into one of:
+- RETURN
+- REPLACEMENT
+- REPAIR
+- PAID_REPAIR
+- INSPECTION
+- REJECT
+## APIs (high level)
+1) Customer Chat
+ - POST /chat/auth — verifies order + phone and creates a session token
+ - POST /chat/start — begins conversation and streams response (SSE)
+ - POST /chat/respond — continues conversation; persists ticket decision when resolved
+2) Staff
+ - Login + ticket update endpoints (role/outlet scope)
+3) Admin
+ - Audit visibility endpoints (read-only oversight patterns)
+## Running locally (recommended: Docker Compose)
+1) Create .env
+```text
+JWT_SECRET_KEY=change_me
 
-1. PostgreSQL required.
-2. Run schema creation scripts in `db/`.
-3. Create `.env` with:
+# Redis
+REDIS_HOST=redis
+REDIS_PORT=6379
+REDIS_USER=stride_admin
+REDIS_PASSWORD=stride_password
+REDIS_DB=0
 
-```env
-# --- Environment Variables for Model Configuration ---
-MODEL_PATH=PATH_TO_LLM_MODEL.gguf
-
-# --- MODEL Setup ---
-CONTEXT_SIZE=CONTEXT_SIZE
-BATCH_SIZE=BATCH_SIZE
-UPDATE_BATCH_SIZE=UPDATE_BATCH_SIZE
-VERBOSE=TRUE/FALSE
-
-# --- Connection Parameters ---
-DB_NAME=<DB_NAME>
-DB_USER=<DB_USER>
-DB_PASSWORD=<DB_PASSWORD>
-DB_HOST=<DB_HOST>
-DB_PORT=<DB_PORT>
-
-# ----------------JWT KEY----------------------------
-JWT_SECRET_KEY=YOUR_JWT_SECRET_KEY
+# Postgres
+DB_NAME=stride
+DB_USER=stride
+DB_PASSWORD=stride
+DB_HOST=postgres
+DB_PORT=5432
 ```
-
-4. Tables:
-
-   * `sales_schema.tickets`
-   * `staff_schema.staff`
-   * `staff_schema.staff_action_log`
-   * Inventory, orders, and sales tables
-
-**Recommendation:** Use Alembic for production migrations.
-
----
-
-## Quick Start
-
+2) Start services
 ```bash
-# Clone repository
-git clone <repo_url>
-cd stride_complaint_system
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-venv\Scripts\activate     # Windows
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Place LLM model
-Models/LLM_MODEL.gguf
-
-# Run FastAPI
-uvicorn main:app --reload
-
-# Health check
+docker compose up --build
+```
+3) Verify API
+```bash
 curl http://localhost:8000/
 ```
+## Policy ingestion (RAG data build)
+Policies are authored in Markdown under policies/.
+An ingestion script splits policies into chunks, embeds them, and stores them in a local policy DB (SQLite) for semantic retrieval.
 
----
-
-## Logging
-
-* **General logs:** `Logs/llama.log`
-* **Error logs:** `Logs/error.log`
-* **Staff audit:** Immutable logs via `db/staff_audit.py`
-* Uses `Services/logger_config.py` for consistent formatting and levels
-
----
-
-## Error Handling & Observability
-
-* All DB calls wrapped in try/except with logging.
-* LLM exceptions captured and logged.
-* Signal arbitration in RAG pipeline ensures fallback to manual inspection.
-
----
-
-## Production Readiness Considerations
-
-* **Thread-Safe LLM Access:** Store model in `app.state` for shared access; consider request queues.
-* **Error Handling:** Centralized logging and exception capture.
-* **Auditability:** Immutable staff action logs.
-* **Configuration Management:** `.env` files and secrets management.
-* **Rate Limiting & Auth:** JWT-based staff authentication.
-* **Scalability:** Separate API routers, stateless endpoints, and database connection pooling.
-
----
-
-## Deployment
-
-### Docker
-
-The application can be containerized using Docker for consistent local development and deployment environments.
-
-#### Prerequisites
-
-* Docker 20+
-* Docker Compose (optional, recommended)
-
-#### Build Image
+Typical flow:
 
 ```bash
-docker build -t stride-complaint-system .
+python ingest/ingest_policies.py
 ```
 
-#### Run Container
+## Testing
+The test strategy is intentionally backend‑centric:
+ - unit tests for deterministic decision engine branches
+ - tests for policy chunk parsing stability
+ - retriever tests (eligibility filtering + similarity ranking)
+ - pipeline tests with mocks to avoid external service dependency
 
+Run:
 ```bash
-docker run -d \
-  --name stride-api \
-  -p 8000:8000 \
-  --env-file .env \
-  -v $(pwd)/Models:/app/Models \
-  stride-complaint-system
+pytest -q
 ```
+Engineering highlights (what this project shows off)
+ - Clean separation: API ↔ orchestration ↔ retrieval ↔ decision ↔ language UX
+ - Deterministic enforcement prevents LLM hallucination from becoming an outcome
+ - Audit-first approach: staff actions are tracked for accountability
+ - Production-ready patterns: env config, service boundaries, observability, safe fallbacks
 
-**Notes:**
+Roadmap
+ - CI pipeline (ruff/pytest/coverage) on every PR
+ - Versioned policy schema + migrations (Alembic)
+ - Stricter classifier output validation (JSON schema + domain constraints)
+ - Analytics dashboard: ticket outcomes, outlet performance, complaint trends
+ - GPU-backed inference for higher throughput
 
-* The LLM model (`.gguf`) is mounted as a volume to avoid baking large files into the image.
-* PostgreSQL should be run as an external service or separate container.
-* Logs are written to the `Logs/` directory inside the container.
-
-#### Example Dockerfile (Reference)
-
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-EXPOSE 8000
-
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
-```
-
----
-
-## Areas for Future Improvement
-
-1. **Multi-Model Ensemble for Better Decision-Making**
-
-   * Integrate multiple LLMs for intent detection, policy retrieval, and response generation.
-
-2. **Enhanced Analytics & Insights**
-
-   * Dashboards for complaint trends, staff performance, and product quality.
-
-3. **Automated Policy Updates**
-
-   * Versioned ingestion pipeline to automatically reflect updated company policies.
-
-4. **Proactive Complaint Prevention**
-
-   * ML models predicting potential issues and reducing complaint volume.
-
-5. **Scalable Model Hosting**
-
-   * GPU-backed inference or cloud endpoints to support high traffic.
-
-6. **Intelligent Ticket Prioritization**
-
-   * Prioritize tickets based on urgency, complaint type, and customer history.
-
----
-
-## Contribution Guidelines
-
-* Follow PEP8 and project structure.
-* All database interactions should include proper exception handling.
-* Add logging for any new module.
-* All policy changes must be version-controlled and reviewed.
-
----
-
-## Contributions & Support
-
-Contributions, issues, and feature requests are welcome.
-Feel free to open an issue or submit a pull request.
-
----
-
-## Contact
-
-* Project Maintainer: [Shushant Rishav](https://github.com/shushantrishav)
+Author
+[Shushant Rishav](https://shushantrishav.in)
+Project: [STRIDE Assistant](https://shushantrishav.in/STRIDE_Assistant/)
