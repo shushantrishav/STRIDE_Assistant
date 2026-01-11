@@ -238,4 +238,5 @@ Roadmap
 
 Author
 [Shushant Rishav](https://shushantrishav.in)
-Project: [STRIDE Assistant](https://shushantrishav.in/STRIDE_Assistant/)
+
+Project: [STRIDE Assistant](https://github.com/shushantrishav/STRIDE_Assistant/)
